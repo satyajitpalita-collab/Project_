@@ -1,0 +1,43 @@
+// AgentChartComponent.jsx
+import React, { useRef, useEffect } from 'react';
+import { VegaEmbed } from "react-vega";
+
+// Store chart refs globally for PDF capture
+export const chartRefs = new Map();
+
+function AgentChartComponent(agentChartComponentProps) { 
+  const chartRef = useRef(null);
+  const chartId = useRef(`chart-${Date.now()}-${Math.random()}`);
+  
+  if (!agentChartComponentProps?.data) {
+    return null;
+  }
+  
+  const spec = JSON.parse(agentChartComponentProps?.data);
+  const updtd_spec = { ...spec, width: 700, height: 350 };
+  
+  useEffect(() => {
+    // Store ref in global map
+    if (chartRef.current) {
+      chartRefs.set(chartId.current, {
+        element: chartRef.current,
+        spec: updtd_spec
+      });
+    }
+    
+    // Cleanup on unmount
+    return () => {
+      chartRefs.delete(chartId.current);
+    };
+  }, []);
+  
+  return (
+    <AgentAccordianComponent title={"Charts"} isDefaultopen={true}>
+      <div ref={chartRef} data-chart-id={chartId.current}>
+        {spec && <VegaEmbed spec={updtd_spec} />}
+      </div>
+    </AgentAccordianComponent>
+  );
+}
+
+export default React.memo(AgentChartComponent);
