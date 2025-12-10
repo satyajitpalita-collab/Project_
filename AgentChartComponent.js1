@@ -1,0 +1,34 @@
+import { VegaEmbed } from "react-vega"
+import AgentAccordianComponent from "./AgentAccordianComponent"
+import React, { useRef } from 'react';
+
+function AgentChartComponent({ data }) {
+
+  if (!data) return null;
+
+  const spec = JSON.parse(data);
+  const updtd_spec = { ...spec, width: 700, height: 350 };
+
+  // This ref points to the Vega container
+  const containerRef = useRef(null);
+
+  return (
+    <AgentAccordianComponent title="Charts" isDefaultopen={true}>
+      <div
+        className="vega-embed"
+        ref={containerRef}    // <- important
+        style={{ display: "inline-block" }}
+      >
+        <VegaEmbed
+          spec={updtd_spec}
+          onNewView={(view) => {
+            // Attach Vega view for PDF export
+            containerRef.current.__vega__ = { view };
+          }}
+        />
+      </div>
+    </AgentAccordianComponent>
+  );
+}
+
+export default React.memo(AgentChartComponent);
