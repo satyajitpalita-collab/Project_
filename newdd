@@ -1,0 +1,388 @@
+const handleDownload = async () => {
+  try {
+    setIsLoading(true); // Show loading state
+    const timestamp = new Date().toISOString().replace(/[: .-]/g, "");
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize. getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 15;
+    const maxWidth = pageWidth - 2 * margin;
+    let y = margin;
+
+    // Add PDF title
+    doc.setFontSize(18);
+    doc.setFont(undefined, 'bold');
+    doc.setTextColor(41, 97, 187);
+    doc.text('Agent Response Report', margin, y);
+    y += 10;
+
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    doc.setTextColor(100, 100, 100);
+    doc.text(`Generated:  ${new Date().toLocaleString()}`, margin, y);
+    y += 10;
+
+    doc.setDrawColor(200, 200, 200);
+    doc.line(margin, y, pageWidth - margin, y);
+    y += 10;
+    doc.setTextColor(0, 0, 0);
+
+    // Helper function to add text with page break handling
+    const addText = (text, fontSize = 10, isBold = false) => {
+      if (!text) return;
+
+      doc.setFontSize(fontSize);
+      doc.setFont(undefined, isBold ? 'bold' : 'normal');
+
+      const lines = doc.splitTextToSize(String(text), maxWidth);
+      const lineHeight = fontSize * 0.5;
+
+      lines.forEach((line) => {
+        if (y + lineHeight > pageHeight - margin) {
+          doc.addPage();
+          y = margin;
+        }
+        doc.text(line, margin, y);
+        y += lineHeight;
+      });
+
+      y += 5; // Add spacing after text
+    };
+
+    // Helper function to add section header
+    const addSection = (title) => {
+      if (y > pageHeight - 30) {
+        doc.addPage();
+        y = margin;
+      }
+      y += 5; // Extra spacing before section
+      doc.setFontSize(12);
+      doc.setFont(undefined, 'bold');
+      doc.setTextColor(26, 54, 115);
+      doc.text(title, margin, y);
+      y += 7;
+      doc.setTextColor(0, 0, 0);
+    };
+
+    // Helper function to capture and add chart to PDF
+    const captureAndAddChart = async (chartIndex) => {
+      try {
+        console.log(`Attempting to capture chart at index ${chartIndex}`);
+
+        // Wait for charts to fully render - increased timeout for Vega
+        await new Promise((resolve) => setTimeout(resolve, 2500));
+
+        // Get all vega-embed containers (this is where VegaEmbed renders)
+        const allVegaContainers = Array.from(
+          document.querySelectorAll('.vega-embed')
+        );
+
+        console.log(`Found ${allVegaContainers.length} vega containers, looking for index ${chartIndex}`);
+
+        if (! allVegaContainers || allVegaContainers. length === 0) {
+          console.warn('No vega-embed containers found in DOM');
+          addText("Chart:  No chart containers found in page");
+          return false;
+        }
+
+        if (chartIndex >= allVegaContainers.length) {
+          console.warn(`Chart at index ${chartIndex} not found.  Available:  ${allVegaContainers.length}`);
+          addText(`Chart: Chart index ${chartIndex} not found (${allVegaContainers. length} available)`);
+          return false;
+        }
+
+        const chartContainer = allVegaContainers[chartIndex];
+        console.log('Chart container found:', chartContainer);
+
+        // Make sure the container is visible
+        const originalDisplay = chartContainer.style.display;
+        const originalVisibility = chartContainer.style.visibility;
+        chartContainer.style. display = 'block';
+        chartContainer.style.visibility = 'visible';
+
+        // Wait for rendering
+        await new Promise((resolve) => setTimeout(resolve, 800));
+
+        let imageData = null;
+
+        // Strategy 1: Try to find and capture SVG (Vega renders SVG)
+        let svgElement = chartContainer.querySelector('svg');
+        
+        if (svgElement) {
+          const bbox = svgElement.getBoundingClientRect();
+          console.log('SVG found with dimensions:', bbox. width, bbox.height);
+
+          if (bbox.width > 0 && bbox.height > 0) {
+            try {
+              const canvas = await html2canvas(svgElement, {
+                backgroundColor: '#ffffff',
+                scale: 2,
+                logging: false,
+                useCORS: true,
+                allowTaint: true,
+              });
+
+              if (canvas. width > 0 && canvas. height > 0) {
+                imageData = canvas.toDataURL('image/png');
+                console.log('Successfully captured SVG');
+              }
+            } catch (svgError) {
+              console. warn('Failed to capture SVG:', svgError);
+            }
+          }
+        }
+
+        // Strategy 2: If SVG capture failed, try capturing the entire container
+        if (!imageData) {
+          console.log('SVG capture failed or unavailable, attempting container capture');
+          try {
+            const canvas = await html2canvas(chartContainer, {
+              backgroundColor: '#ffffff',
+              scale: 2,
+              logging: false,
+              useCORS: true,
+              allowTaint: true,
+              removeContainer: false,
+            });
+
+            if (canvas.width > 0 && canvas.height > 0) {
+              imageData = canvas.toDataURL('image/png');
+              console.log('Successfully captured container');
+            }
+          } catch (containerError) {
+            console.warn('Failed to capture container:', containerError);
+          }
+        }
+
+        // Strategy 3: Try canvas elements (fallback)
+        if (!imageData) {
+          console.log('Attempting to capture canvas elements');
+          const canvasElements = chartContainer.querySelectorAll('canvas');
+          if (canvasElements.length > 0) {
+            const firstCanvas = canvasElements[0];
+            imageData = firstCanvas.toDataURL('image/png');
+            console.log('Successfully captured from canvas element');
+          }
+        }
+
+        // Restore original styles
+        chartContainer. style.display = originalDisplay;
+        chartContainer.style.visibility = originalVisibility;
+
+        if (! imageData) {
+          console. warn('Failed to capture chart image with all strategies');
+          addText("Chart:  Unable to capture chart image");
+          return false;
+        }
+
+        // Create image to get dimensions
+        const img = new Image();
+        img.src = imageData;
+        
+        await new Promise((resolve) => {
+          img.onload = resolve;
+          img.onerror = () => {
+            console.warn('Failed to load captured image');
+            resolve();
+          };
+        });
+
+        let imgWidth = maxWidth;
+        let imgHeight = (img.height * imgWidth) / img.width;
+
+        // Check if chart fits on current page
+        const maxImgHeight = pageHeight - 2 * margin - 20;
+        if (y + imgHeight > pageHeight - margin) {
+          doc.addPage();
+          y = margin;
+        }
+
+        // Adjust height if it exceeds max
+        if (imgHeight > maxImgHeight) {
+          imgHeight = maxImgHeight;
+          imgWidth = (img.width * imgHeight) / img.height;
+        }
+
+        // Center the image
+        const xPosition = margin + (maxWidth - imgWidth) / 2;
+
+        // Add image to PDF
+        doc.addImage(imageData, 'PNG', xPosition, y, imgWidth, imgHeight);
+        y += imgHeight + 10;
+
+        console.log('Chart added successfully to PDF');
+        return true;
+      } catch (error) {
+        console.error('Error capturing chart:', error);
+        addText(`Chart: Error - ${error.message}`);
+        return false;
+      }
+    };
+
+    let chartCounter = 0;
+
+    // Process filtered array
+    for (let i = 0; i < filteredArr?. length; i++) {
+      const chat = filteredArr[i];
+      const { event, data:  chatData } = chat;
+
+      // Skip progress events if toggle is off
+      const isProgressEvent = [
+        "response.status",
+        "response.tool_result. status",
+        "response.thinking",
+        "response.thinking.delta",
+        "response.tool_use",
+        "response.tool_result"
+      ].includes(event);
+
+      if (isProgressEvent && ! agentProgressToggle) {
+        continue;
+      }
+
+      // Handle different event types
+      switch (event) {
+        case "response.thinking":
+          if (agentProgressToggle && chatData?.text) {
+            addSection("Thinking Process:");
+            addText(chatData.text);
+          }
+          break;
+
+        case "response.tool_use": 
+          if (agentProgressToggle && chatData) {
+            addSection("Tool Use:");
+            addText(`Tool: ${chatData.name || 'Unknown'}`);
+            if (chatData.input) {
+              addText(JSON.stringify(chatData.input, null, 2), 9);
+            }
+          }
+          break;
+
+        case "response. tool_result":
+          if (agentProgressToggle && chatData?. content) {
+            chatData.content.forEach((item) => {
+              if (!item?. json) return;
+
+              Object. keys(item.json).forEach((type) => {
+                const data = item.json[type];
+
+                switch (type) {
+                  case "sql":
+                    addSection("SQL Query:");
+                    addText(data, 9);
+                    break;
+
+                  case "result_set": 
+                    const { data: dataT, resultSetMetaData } = data;
+                    if (!dataT || !resultSetMetaData) break;
+
+                    addSection("Query Results:");
+
+                    // Table headers
+                    const headers = resultSetMetaData.rowType.map((item) => item.name);
+                    if (headers && headers.length > 0) {
+                      addText(headers.join(" | "), 10, true);
+                      addText("-".repeat(Math.min(headers.join(" | ").length, 100)));
+
+                      // Table rows (limit to 50)
+                      const maxRows = 50;
+                      dataT. slice(0, maxRows).forEach((rowData) => {
+                        addText(rowData.join(" | "), 9);
+                      });
+
+                      if (dataT.length > maxRows) {
+                        addText(`... and ${dataT.length - maxRows} more rows`, 9);
+                      }
+                    }
+                    break;
+                }
+              });
+            });
+          }
+          break;
+
+        case "response.chart":
+          addSection("Chart Visualization:");
+
+          try {
+            // Parse chart spec from chatData
+            let spec = null;
+            if (chatData?.chart_spec) {
+              try {
+                spec = typeof chatData.chart_spec === 'string' 
+                  ? JSON.parse(chatData. chart_spec) 
+                  : chatData.chart_spec;
+                console.log('Chart spec parsed:', spec);
+              } catch (e) {
+                console.warn('Failed to parse chart spec:', e);
+              }
+            }
+
+            // Add chart title if available
+            if (spec?.title) {
+              addText(spec.title, 11, true);
+            }
+
+            // KEY FIX: Pass the correct chart index to capture function
+            // chartCounter tracks which "response.chart" event we're on
+            console.log(`Processing response.chart event #${chartCounter}`);
+            const success = await captureAndAddChart(chartCounter);
+
+            if (!success) {
+              addText("Note: Chart could not be captured. The chart may not have fully rendered.");
+            }
+
+            chartCounter++; // Increment only after processing each chart event
+          } catch (error) {
+            console.error('Error processing chart:', error);
+            addText(`Chart: Error processing - ${error.message}`);
+          }
+          break;
+
+        case "response.table":
+          if (chatData) {
+            addSection("Table Data:");
+            addText(JSON.stringify(chatData, null, 2), 9);
+          }
+          break;
+
+        case "response.text":
+          if (chatData?. text) {
+            addSection("Response:");
+            addText(chatData.text);
+          }
+          break;
+
+        case "response.status":
+          if (agentProgressToggle && chatData?. message) {
+            addText(`Status: ${chatData.message}`, 10, true);
+          }
+          break;
+      }
+    }
+
+    // Add page numbers
+    const pageCount = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setTextColor(150, 150, 150);
+      doc.text(
+        `Page ${i} of ${pageCount}`,
+        pageWidth / 2,
+        pageHeight - 10,
+        { align: 'center' }
+      );
+    }
+
+    // Save PDF
+    doc.save(`agent_response_${timestamp}.pdf`);
+    alert('PDF downloaded successfully!');
+  } catch (error) {
+    console.error('Error in handleDownload:', error);
+    alert(`Error downloading PDF: ${error.message}`);
+  } finally {
+    setIsLoading(false);
+  }
+};
