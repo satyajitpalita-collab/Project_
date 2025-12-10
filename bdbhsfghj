@@ -1,0 +1,21 @@
+const captureChartAsImage = async (chartContainer) => {
+  try {
+    // Wait to ensure chart is mounted
+    await new Promise((res) => setTimeout(res, 300));
+
+    const embedInfo = chartContainer.__vega__;
+    if (!embedInfo) {
+      console.log("No Vega instance found — cannot export chart");
+      return null;
+    }
+
+    const view = embedInfo.view;
+
+    // Export chart directly from Vega's rendering engine
+    const url = await view.toImageURL("png", 2);  // scale = 2 for HD
+    return url;
+  } catch (err) {
+    console.error("captureChartAsImage error:", err);
+    return null;
+  }
+};
