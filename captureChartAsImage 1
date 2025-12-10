@@ -1,0 +1,18 @@
+const captureChartAsImage = async (chartContainer) => {
+  try {
+    const vegaInfo = chartContainer.__vega__;
+
+    if (!vegaInfo || !vegaInfo.view) {
+      console.error("Vega view not found for:", chartContainer);
+      return null;
+    }
+
+    // Export directly from Vega
+    const url = await vegaInfo.view.toImageURL("png", 2);
+    return url;
+
+  } catch (err) {
+    console.error("Vega export error:", err);
+    return null;
+  }
+};
