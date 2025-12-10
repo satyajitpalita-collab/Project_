@@ -1,0 +1,199 @@
+// AgentChatBotFeedback.jsx
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
+import { chartRefs } from './AgentChartComponent'; // Import the chart refs
+
+const handleDownload = async () => {
+  const timestamp = new Date().toISOString().replace(/[:.-]/g, "");
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 15;
+  const maxWidth = pageWidth - 2 * margin;
+  let y = margin;
+  
+  // Show loading indicator
+  // setIsDownloading(true); // Add this state if you want loading indicator
+  
+  const checkPageBreak = (requiredHeight) => {
+    if (y + requiredHeight > pageHeight - margin) {
+      doc.addPage();
+      y = margin;
+      return true;
+    }
+    return false;
+  };
+  
+  const addText = (text, fontSize = 10, isBold = false) => {
+    doc.setFontSize(fontSize);
+    doc.setFont(undefined, isBold ? 'bold' : 'normal');
+    
+    const lines = doc.splitTextToSize(text, maxWidth);
+    const lineHeight = fontSize * 0.5;
+    
+    lines.forEach((line) => {
+      checkPageBreak(lineHeight);
+      doc.text(line, margin, y);
+      y += lineHeight;
+    });
+    
+    y += 5;
+  };
+  
+  const addSection = (title) => {
+    y += 5;
+    addText(title, 14, true);
+    y += 2;
+  };
+  
+  // Capture chart and add to PDF
+  const addChartToPDF = async (chartId) => {
+    try {
+      // Find chart by ID
+      const chartElement = document.querySelector(`[data-chart-id="${chartId}"]`);
+      
+      if (!chartElement) {
+        addText("Chart: Unable to locate chart");
+        return;
+      }
+      
+      // Wait a bit for chart to fully render
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Capture the chart
+      const canvas = await html2canvas(chartElement, {
+        backgroundColor: '#ffffff',
+        scale: 2,
+        logging: false,
+        useCORS: true,
+        allowTaint: true
+      });
+      
+      const imgData = canvas.toDataURL('image/png');
+      
+      // Calculate dimensions
+      const imgWidth = maxWidth;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      
+      // Limit height to avoid huge images
+      const maxImgHeight = pageHeight - 2 * margin - 20;
+      const finalImgHeight = Math.min(imgHeight, maxImgHeight);
+      const finalImgWidth = imgWidth * (finalImgHeight / imgHeight);
+      
+      checkPageBreak(finalImgHeight + 10);
+      
+      // Center the image if it's smaller than page width
+      const xPosition = margin + (maxWidth - finalImgWidth) / 2;
+      
+      doc.addImage(imgData, 'PNG', xPosition, y, finalImgWidth, finalImgHeight);
+      y += finalImgHeight + 10;
+      
+    } catch (error) {
+      console.error('Error capturing chart:', error);
+      addText(`Chart: Unable to capture (${error.message})`);
+    }
+  };
+  
+  // Process all events
+  let chartCounter = 0;
+  
+  for (let i = 0; i < filteredArr?.length; i++) {
+    const chat = filteredArr[i];
+    const { event, data: chatData } = chat;
+    
+    const isProgressEvent = [
+      "response.status", 
+      "response.tool_result.status",
+      "response.thinking", 
+      "response.thinking.delta",
+      "response.tool_use", 
+      "response.tool_result"
+    ].includes(event);
+    
+    if (isProgressEvent && !agentProgressToggle) {
+      continue;
+    }
+    
+    if (event === "response.thinking") {
+      addSection("Thinking Process:");
+      addText(chatData?.text);
+    }
+    else if (event === "response.tool_use") {
+      if (agentProgressToggle) {
+        addSection("Tool Use:");
+        addText(JSON.stringify(chatData, null, 2));
+      }
+    }
+    else if (event === "response.tool_result") {
+      if (agentProgressToggle) {
+        chatData?.content?.forEach((item) => {
+          Object.keys(item?.json).forEach((type) => {
+            const data = item?.json[type];
+            
+            if (type === "sql") {
+              addSection("SQL Query:");
+              addText(data);
+            }
+            else if (type === "result_set") {
+              const { data: dataT, resultSetMetaData } = data;
+              addSection("Data Table:");
+              
+              const headers = resultSetMetaData?.rowType?.map(item => item?.name);
+              if (headers) {
+                addText(headers.join(" | "), 10, true);
+                addText("-".repeat(Math.min(headers.join(" | ").length, 100)));
+                
+                const maxRows = 50;
+                dataT?.slice(0, maxRows).forEach((rowData) => {
+                  addText(rowData.join(" | "));
+                });
+                
+                if (dataT?.length > maxRows) {
+                  addText(`... and ${dataT.length - maxRows} more rows`);
+                }
+              }
+            }
+          });
+        });
+      }
+    }
+    else if (event === "response.chart") {
+      addSection("Chart:");
+      
+      // Parse and add chart title
+      try {
+        const spec = chatData?.chart_spec ? JSON.parse(chatData.chart_spec) : null;
+        if (spec?.title) {
+          addText(spec.title, 12, true);
+        }
+        
+        // Find the chart element by index
+        const chartElements = Array.from(document.querySelectorAll('[data-chart-id]'));
+        if (chartElements[chartCounter]) {
+          const chartId = chartElements[chartCounter].getAttribute('data-chart-id');
+          await addChartToPDF(chartId);
+        } else {
+          addText("Chart: Unable to locate chart element");
+        }
+        chartCounter++;
+        
+      } catch (error) {
+        console.error('Error processing chart:', error);
+        addText("Chart: Error processing chart data");
+      }
+    }
+    else if (event === "response.table") {
+      addSection("Table Data:");
+      addText(JSON.stringify(chatData, null, 2));
+    }
+    else if (event === "response.text") {
+      addSection("Response:");
+      addText(chatData?.text);
+    }
+  }
+  
+  // Save PDF
+  doc.save(`agent_${timestamp}.pdf`);
+  
+  // setIsDownloading(false); // Hide loading indicator
+};
